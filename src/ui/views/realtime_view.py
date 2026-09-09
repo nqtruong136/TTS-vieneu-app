@@ -414,12 +414,8 @@ class RealtimeView(ctk.CTkFrame):
         try:
             generator = self.tts_engine.infer_stream(text, voice=voice)
 
-            def on_chunk(chunk_idx: int, duration_sec: float):
-                nonlocal first_chunk_time
-                if first_chunk_time is None:
-                    first_chunk_time = time.time() - t0
-                ms = first_chunk_time * 1000.0
-                stat = f"⚡ Độ trễ: {ms:.0f}ms • {chunk_idx} chunks ({duration_sec:.1f}s)"
+            def on_chunk(chunk_idx: int, duration_sec: float, latency_ms: float = 0.0):
+                stat = f"⚡ Độ trễ: {latency_ms:.0f}ms • {chunk_idx} chunks ({duration_sec:.1f}s) • Đệm mượt mà"
                 UIDispatcher.post(self.stream_stats_label.configure, text=stat)
 
             def on_finished():

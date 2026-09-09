@@ -1,0 +1,42 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Virtual Environment
+.venv/
+venv/
+ENV/
+env/
+env.bak/
+venv.bak/
+
+# SQLite Database
+*.db
+*.sqlite3
+history.db
+
+# Audio Outputs (keep folder structure via .gitkeep)
+outputs/*
+!outputs/.gitkeep
+
+# IDE & Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Logs and temporary files
+*.log
+scratch/
+temp/
+tmp/
+
+# OS specific files
+Thumbs.db
+Desktop.ini
+.DS_Store
+

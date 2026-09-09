@@ -1,0 +1,29 @@
+# VieNeu-TTS Studio Dependencies
+# ------------------------------
+
+# Core GUI & Media Player
+customtkinter>=5.2.0
+pygame>=2.6.0
+pillow>=10.0.0
+
+# Audio Processing & Realtime Playback
+soundfile>=0.12.1
+sounddevice>=0.5.0
+numpy>=1.26.0
+
+# Windows Clipboard Integration
+pyperclip>=1.8.0
+
+# VieNeu-TTS SDK
+vieneu>=3.6.4
+
+# Pinned stable transformers for VieNeu & GPU acceleration
+transformers==4.57.6
+
+# -------------------------------------------------------------------------
+# GPU Acceleration Note (NVIDIA CUDA):
+# On Windows, install PyTorch CUDA before or alongside via:
+#   pip install torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+# Or use:
+#   pip install -r requirements-gpu.txt
+# -------------------------------------------------------------------------

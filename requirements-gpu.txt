@@ -1,0 +1,18 @@
+# VieNeu-TTS Studio - GPU (NVIDIA CUDA 12.8) Requirements
+# Install with: pip install -r requirements-gpu.txt
+
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch
+torchaudio
+transformers==4.57.6
+vieneu>=3.6.4
+
+# GUI & Audio
+customtkinter>=5.2.0
+pygame>=2.6.0
+soundfile>=0.12.1
+sounddevice>=0.5.0
+pyperclip>=1.8.0
+pillow>=10.0.0
+numpy>=1.26.0
+

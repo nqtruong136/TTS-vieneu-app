@@ -324,8 +324,26 @@ class AppWindow(ctk.CTk):
 
     def on_closing(self):
         try:
-            self.audio_player.stop()
+            if hasattr(self, "audio_player") and self.audio_player:
+                self.audio_player.stop()
         except Exception:
             pass
-        AppLogger.info("Đang thoát ứng dụng...", source="App")
-        self.destroy()
+
+        try:
+            if hasattr(self, "realtime_view") and self.realtime_view:
+                if hasattr(self.realtime_view, "audio_streamer") and self.realtime_view.audio_streamer:
+                    self.realtime_view.audio_streamer.stop()
+                if hasattr(self.realtime_view, "clipboard_watcher") and self.realtime_view.clipboard_watcher:
+                    self.realtime_view.clipboard_watcher.stop()
+        except Exception:
+            pass
+
+        try:
+            AppLogger.info("Đang đóng và giải phóng ứng dụng...", source="App")
+            self.destroy()
+        except Exception:
+            pass
+        finally:
+            import os
+            os._exit(0)
+

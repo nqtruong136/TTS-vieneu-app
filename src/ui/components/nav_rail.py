@@ -17,13 +17,23 @@ class NavRail(ctk.CTkFrame):
         master,
         on_nav_change: Optional[Callable[[str], None]] = None,
         on_open_log: Optional[Callable[[], None]] = None,
+        on_theme_change: Optional[Callable[[str], None]] = None,
+        initial_theme: str = "Dark",
         **kwargs
     ):
-        super().__init__(master, width=195, corner_radius=0, **kwargs)
+        super().__init__(
+            master,
+            width=195,
+            corner_radius=0,
+            fg_color=COLORS["sidebar_bg_dark"],
+            **kwargs
+        )
         self.grid_propagate(False)
 
         self.on_nav_change = on_nav_change
         self.on_open_log = on_open_log
+        self.on_theme_change = on_theme_change
+        self.initial_theme = initial_theme
         self.current_view = "preset"
         self._nav_buttons: Dict[str, ctk.CTkButton] = {}
 
@@ -119,7 +129,7 @@ class NavRail(ctk.CTkFrame):
             font=("Segoe UI", 10),
             command=self._change_appearance_mode
         )
-        self.theme_menu.set("Dark")
+        self.theme_menu.set(self.initial_theme)
         self.theme_menu.pack(side="right")
 
     def _handle_click(self, key: str):
@@ -161,3 +171,11 @@ class NavRail(ctk.CTkFrame):
 
     def _change_appearance_mode(self, mode: str):
         ctk.set_appearance_mode(mode)
+        if self.on_theme_change:
+            self.on_theme_change(mode)
+
+    def set_theme(self, mode: str):
+        """Đồng bộ hiển thị theme menu từ bên ngoài."""
+        self.theme_menu.set(mode)
+        ctk.set_appearance_mode(mode)
+

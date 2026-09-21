@@ -33,7 +33,11 @@ from .progress import ProgressTracker
 
 
 class TTSEngine:
-    def __init__(self, on_status_change: Optional[Callable[[str, bool, bool, Optional[str]], None]] = None):
+    def __init__(
+        self,
+        on_status_change: Optional[Callable[[str, bool, bool, Optional[str]], None]] = None,
+        output_dir: Optional[str] = None
+    ):
         self._engine = None
         self._current_profile_key = None
         self._current_config = None
@@ -41,8 +45,25 @@ class TTSEngine:
         self._is_loading = False
         self._is_ready = False
         self._on_status_change = on_status_change
+        self.output_dir = Path(output_dir) if output_dir else OUTPUTS_DIR
+        try:
+            self.output_dir.mkdir(parents=True, exist_ok=True)
+        except Exception:
+            pass
 
         # Global progress tracker cho Engine
+        self.progress = ProgressTracker()
+
+    def set_output_dir(self, path: str):
+        """Thay đổi thư mục lưu trữ file âm thanh sinh ra."""
+        try:
+            p = Path(path)
+            p.mkdir(parents=True, exist_ok=True)
+            self.output_dir = p
+            AppLogger.info(f"Đã cập nhật thư mục lưu âm thanh: {p}", source="TTSEngine")
+        except Exception as e:
+            AppLogger.warning(f"Không thể tạo thư mục âm thanh '{path}': {e}", source="TTSEngine")
+
         self.progress = ProgressTracker()
 
     def notify_status(self, message: str, is_ready: bool = False, is_loading: bool = False, error: Optional[str] = None):
@@ -261,7 +282,7 @@ class TTSEngine:
             timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
             safe_voice = voice.replace(" ", "_") if not ref_audio else "Cloned"
             filename = f"vieneu_{safe_voice}_{timestamp_str}.wav"
-            out_path = str(OUTPUTS_DIR / filename)
+            out_path = str(self.output_dir / filename)
 
             # Lưu file âm thanh
             if hasattr(self._engine, "save"):

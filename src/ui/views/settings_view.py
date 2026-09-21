@@ -20,7 +20,8 @@ from ..components.log_console import LogConsole
 from ..components.progress_bar import ProgressDisplay
 from ..components.action_log_box import ActionLogBox
 from ..dispatcher import UIDispatcher
-from ...config import PROFILES, DEFAULT_PROFILE_KEY
+from ...config import PROFILES, DEFAULT_PROFILE_KEY, PRESET_VOICES, DEFAULT_VOICE, OUTPUTS_DIR
+from ...core.config_manager import ConfigManager
 
 
 class SettingsView(ctk.CTkScrollableFrame):
@@ -28,17 +29,38 @@ class SettingsView(ctk.CTkScrollableFrame):
         self,
         master,
         tts_engine: TTSEngine,
+        config_manager: Optional[ConfigManager] = None,
         on_profile_reloaded: Optional[Callable[[str], None]] = None,
+        on_config_saved: Optional[Callable[[dict], None]] = None,
         **kwargs
     ):
         super().__init__(master, fg_color="transparent", **kwargs)
 
         self.tts_engine = tts_engine
+        self.config_manager = config_manager or ConfigManager.get_instance()
         self.on_profile_reloaded = on_profile_reloaded
+        self.on_config_saved = on_config_saved
         self._profiles_map = {cfg["name"]: key for key, cfg in PROFILES.items()}
 
-        # Thư mục cài đặt do người dùng chỉ định (mặc định là .venv hiện tại)
+        # Thư mục cài đặt CUDA do người dùng chỉ định (mặc định là .venv hiện tại)
         self.install_folder_var = ctk.StringVar(value=os.path.abspath(sys.prefix))
+
+        # Biến cấu hình ứng dụng được nạp từ ConfigManager
+        self.auto_load_var = ctk.BooleanVar(value=self.config_manager.get("auto_load_on_startup", True))
+        self.auto_play_var = ctk.BooleanVar(value=self.config_manager.get("auto_play_audio", True))
+        self.output_dir_var = ctk.StringVar(value=self.config_manager.get("audio_output_dir", str(OUTPUTS_DIR)))
+        self.default_voice_var = ctk.StringVar(value=self.config_manager.get("default_voice", DEFAULT_VOICE))
+        self.theme_var = ctk.StringVar(value=self.config_manager.get("appearance_mode", "Dark"))
+        self.realtime_clip_var = ctk.BooleanVar(value=self.config_manager.get("realtime_clipboard_trigger", False))
+
+        prebuf = self.config_manager.get("realtime_prebuffer_chunks", 2)
+        if prebuf == 1:
+            buf_str = "1 chunk (Siêu tốc ~200ms - Cho máy mạnh)"
+        elif prebuf == 3:
+            buf_str = "3 chunks (Mượt mà tối đa - Chống giật)"
+        else:
+            buf_str = "2 chunks (Cân bằng - Khuyên dùng)"
+        self.jitter_buffer_var = ctk.StringVar(value=buf_str)
 
         # Các tracker tiến trình chuyên biệt
         self.cuda_progress = ProgressTracker()
@@ -49,6 +71,7 @@ class SettingsView(ctk.CTkScrollableFrame):
         self._create_widgets()
         self._refresh_hardware_info()
         self._refresh_model_cache_info()
+
 
     def _create_widgets(self):
         # Header
@@ -174,15 +197,27 @@ class SettingsView(ctk.CTkScrollableFrame):
         # =========================================================================
         # SECTION 2: CẤU HÌNH ENGINE & THIẾT BỊ (Engine Setup)
         # =========================================================================
-        sec2 = self._create_section_card("⚙️ 2. CẤU HÌNH ENGINE & TÙY CHỌN THIẾT BỊ")
+        sec2 = self._create_section_card("⚙️ 2. CẤU HÌNH ENGINE, LƯU TRỮ & TÙY CHỌN HỆ THỐNG")
 
-        cfg_grid = ctk.CTkFrame(sec2, fg_color="transparent")
-        cfg_grid.pack(fill="x", padx=14, pady=8)
+        # --- A. CẤU HÌNH ENGINE & MÔ HÌNH ---
+        card_engine = ctk.CTkFrame(sec2, fg_color=COLORS["card_bg_dark"], corner_radius=6)
+        card_engine.pack(fill="x", padx=14, pady=(8, 6))
+
+        ctk.CTkLabel(
+            card_engine,
+            text="🧠 CẤU HÌNH MÔ HÌNH & KHỞI ĐỘNG",
+            font=("Segoe UI", 11, "bold"),
+            text_color=COLORS["primary"],
+            anchor="w"
+        ).pack(fill="x", padx=12, pady=(8, 4))
+
+        cfg_grid = ctk.CTkFrame(card_engine, fg_color="transparent")
+        cfg_grid.pack(fill="x", padx=12, pady=(0, 6))
         cfg_grid.grid_columnconfigure(0, weight=1)
         cfg_grid.grid_columnconfigure(1, weight=1)
 
         # Chọn bộ profile
-        ctk.CTkLabel(cfg_grid, text="Bộ cấu hình mẫu:", font=FONTS["header"]).grid(row=0, column=0, sticky="w", pady=2)
+        ctk.CTkLabel(cfg_grid, text="Bộ cấu hình mẫu khởi động:", font=FONTS["caption"], text_color=COLORS["text_muted_dark"]).grid(row=0, column=0, sticky="w", pady=2)
         profile_names = list(self._profiles_map.keys())
         self.profile_menu = ctk.CTkOptionMenu(
             cfg_grid,
@@ -190,41 +225,213 @@ class SettingsView(ctk.CTkScrollableFrame):
             height=32,
             command=self._on_profile_select
         )
-        self.profile_menu.set(PROFILES[DEFAULT_PROFILE_KEY]["name"])
-        self.profile_menu.grid(row=1, column=0, sticky="ew", padx=(0, 10), pady=(0, 8))
+        saved_prof_key = self.config_manager.get("default_profile", DEFAULT_PROFILE_KEY)
+        saved_prof_name = PROFILES.get(saved_prof_key, PROFILES[DEFAULT_PROFILE_KEY])["name"]
+        self.profile_menu.set(saved_prof_name)
+        self.profile_menu.grid(row=1, column=0, sticky="ew", padx=(0, 10), pady=(0, 6))
 
         # Precision (fp32 vs int8)
-        ctk.CTkLabel(cfg_grid, text="Độ chính xác CPU (Precision):", font=FONTS["header"]).grid(row=0, column=1, sticky="w", pady=2)
+        ctk.CTkLabel(cfg_grid, text="Độ chính xác CPU (Precision):", font=FONTS["caption"], text_color=COLORS["text_muted_dark"]).grid(row=0, column=1, sticky="w", pady=2)
         self.precision_menu = ctk.CTkOptionMenu(
             cfg_grid,
             values=["fp32 (Chất lượng tối đa)", "int8 (Tăng tốc VNNI - Nhẹ x4)"],
             height=32
         )
-        self.precision_menu.grid(row=1, column=1, sticky="ew", pady=(0, 8))
+        saved_prec = self.config_manager.get("precision", "fp32")
+        self.precision_menu.set("int8 (Tăng tốc VNNI - Nhẹ x4)" if saved_prec == "int8" else "fp32 (Chất lượng tối đa)")
+        self.precision_menu.grid(row=1, column=1, sticky="ew", pady=(0, 6))
 
         # Profile description
         self.profile_desc_label = ctk.CTkLabel(
-            sec2,
-            text=PROFILES[DEFAULT_PROFILE_KEY]["description"],
+            card_engine,
+            text=PROFILES.get(saved_prof_key, PROFILES[DEFAULT_PROFILE_KEY])["description"],
             font=FONTS["caption"],
             text_color="gray",
             anchor="w",
             wraplength=700,
             justify="left"
         )
-        self.profile_desc_label.pack(fill="x", padx=14, pady=(0, 8))
+        self.profile_desc_label.pack(fill="x", padx=12, pady=(0, 6))
 
-        # Apply button
+        # Switch auto-load on startup
+        self.switch_auto_load = ctk.CTkSwitch(
+            card_engine,
+            text="⚡ Tự động nạp mô hình ngay khi mở ứng dụng (Startup Auto-load)",
+            variable=self.auto_load_var,
+            font=FONTS["caption"]
+        )
+        self.switch_auto_load.pack(anchor="w", padx=12, pady=(0, 10))
+
+        # --- B. LƯU TRỮ & THƯ MỤC XUẤT TỆP ÂM THANH ---
+        card_storage = ctk.CTkFrame(sec2, fg_color=COLORS["card_bg_dark"], corner_radius=6)
+        card_storage.pack(fill="x", padx=14, pady=6)
+
+        ctk.CTkLabel(
+            card_storage,
+            text="💾 THƯ MỤC LƯU TRỮ & PHÁT ÂM THANH",
+            font=("Segoe UI", 11, "bold"),
+            text_color=COLORS["primary"],
+            anchor="w"
+        ).pack(fill="x", padx=12, pady=(8, 4))
+
+        ctk.CTkLabel(
+            card_storage,
+            text="📁 Thư mục lưu tệp âm thanh WAV sinh ra:",
+            font=FONTS["caption"],
+            text_color=COLORS["text_muted_dark"],
+            anchor="w"
+        ).pack(fill="x", padx=12, pady=(0, 2))
+
+        f_out_row = ctk.CTkFrame(card_storage, fg_color="transparent")
+        f_out_row.pack(fill="x", padx=12, pady=(0, 6))
+
+        self.entry_output_dir = ctk.CTkEntry(
+            f_out_row,
+            textvariable=self.output_dir_var,
+            height=30,
+            font=FONTS["caption"]
+        )
+        self.entry_output_dir.pack(side="left", fill="x", expand=True, padx=(0, 8))
+
+        ctk.CTkButton(
+            f_out_row,
+            text="📂 Chọn thư mục...",
+            width=120,
+            height=30,
+            font=FONTS["caption"],
+            fg_color="transparent",
+            border_width=1,
+            border_color=COLORS["border_dark"],
+            command=self._browse_output_folder
+        ).pack(side="left", padx=(0, 6))
+
+        ctk.CTkButton(
+            f_out_row,
+            text="📁 Mở thư mục",
+            width=100,
+            height=30,
+            font=FONTS["caption"],
+            fg_color="transparent",
+            border_width=1,
+            border_color=COLORS["border_dark"],
+            command=self._open_output_folder
+        ).pack(side="right")
+
+        self.switch_auto_play = ctk.CTkSwitch(
+            card_storage,
+            text="▶️ Tự động phát âm thanh ngay sau khi tạo xong (Auto-play)",
+            variable=self.auto_play_var,
+            font=FONTS["caption"]
+        )
+        self.switch_auto_play.pack(anchor="w", padx=12, pady=(0, 10))
+
+        # --- C. GIỌNG ĐỌC, GIAO DIỆN & REALTIME ---
+        card_prefs = ctk.CTkFrame(sec2, fg_color=COLORS["card_bg_dark"], corner_radius=6)
+        card_prefs.pack(fill="x", padx=14, pady=6)
+
+        ctk.CTkLabel(
+            card_prefs,
+            text="🎨 GIỌNG ĐỌC, GIAO DIỆN & REALTIME STREAMING",
+            font=("Segoe UI", 11, "bold"),
+            text_color=COLORS["primary"],
+            anchor="w"
+        ).pack(fill="x", padx=12, pady=(8, 4))
+
+        pref_grid = ctk.CTkFrame(card_prefs, fg_color="transparent")
+        pref_grid.pack(fill="x", padx=12, pady=(0, 6))
+        pref_grid.grid_columnconfigure(0, weight=1)
+        pref_grid.grid_columnconfigure(1, weight=1)
+
+        # Giọng đọc mặc định
+        ctk.CTkLabel(pref_grid, text="Giọng đọc ưu tiên ban đầu:", font=FONTS["caption"], text_color=COLORS["text_muted_dark"]).grid(row=0, column=0, sticky="w", pady=2)
+        voice_names = [v["name"] for v in PRESET_VOICES]
+        self.default_voice_menu = ctk.CTkOptionMenu(
+            pref_grid,
+            values=voice_names,
+            height=32
+        )
+        saved_voice = self.config_manager.get("default_voice", DEFAULT_VOICE)
+        if saved_voice in voice_names:
+            self.default_voice_menu.set(saved_voice)
+        else:
+            self.default_voice_menu.set(DEFAULT_VOICE)
+        self.default_voice_menu.grid(row=1, column=0, sticky="ew", padx=(0, 10), pady=(0, 6))
+
+        # Giao diện mặc định (Theme)
+        ctk.CTkLabel(pref_grid, text="Giao diện hiển thị mặc định:", font=FONTS["caption"], text_color=COLORS["text_muted_dark"]).grid(row=0, column=1, sticky="w", pady=2)
+        self.theme_menu_setting = ctk.CTkOptionMenu(
+            pref_grid,
+            values=["Dark", "Light", "System"],
+            height=32,
+            command=self._on_theme_select
+        )
+        self.theme_menu_setting.set(self.theme_var.get())
+        self.theme_menu_setting.grid(row=1, column=1, sticky="ew", pady=(0, 6))
+
+        # Realtime Jitter-Buffer & Clipboard Trigger
+        ctk.CTkLabel(pref_grid, text="Bộ đệm Realtime (Jitter-Buffer):", font=FONTS["caption"], text_color=COLORS["text_muted_dark"]).grid(row=2, column=0, sticky="w", pady=2)
+        self.jitter_menu = ctk.CTkOptionMenu(
+            pref_grid,
+            values=[
+                "1 chunk (Siêu tốc ~200ms - Cho máy mạnh)",
+                "2 chunks (Cân bằng - Khuyên dùng)",
+                "3 chunks (Mượt mà tối đa - Chống giật)"
+            ],
+            height=32
+        )
+        self.jitter_menu.set(self.jitter_buffer_var.get())
+        self.jitter_menu.grid(row=3, column=0, sticky="ew", padx=(0, 10), pady=(0, 6))
+
+        # Switch Clipboard trigger
+        self.switch_clip_trigger = ctk.CTkSwitch(
+            pref_grid,
+            text="📋 Tự động bật đọc khi Copy (Clipboard Trigger)",
+            variable=self.realtime_clip_var,
+            font=FONTS["caption"]
+        )
+        self.switch_clip_trigger.grid(row=3, column=1, sticky="w", pady=(0, 6))
+
+        # --- D. THANH THAO TÁC CẤU HÌNH (Action Buttons) ---
+        action_bar = ctk.CTkFrame(sec2, fg_color="transparent")
+        action_bar.pack(fill="x", padx=14, pady=(8, 12))
+
+        self.btn_save_config = ctk.CTkButton(
+            action_bar,
+            text="💾 Lưu cấu hình mặc định",
+            height=38,
+            width=180,
+            font=("Segoe UI", 12, "bold"),
+            fg_color="#10B981",
+            hover_color="#059669",
+            command=self._save_configuration
+        )
+        self.btn_save_config.pack(side="left", padx=(0, 10))
+
         self.btn_apply_config = ctk.CTkButton(
-            sec2,
-            text="🔄 Áp dụng cấu hình & Nạp lại Engine",
-            height=36,
+            action_bar,
+            text="🔄 Áp dụng & Nạp lại Engine",
+            height=38,
+            width=200,
             font=("Segoe UI", 12, "bold"),
             fg_color=COLORS["primary"],
             hover_color=COLORS["primary_hover"],
             command=self._apply_engine_config
         )
-        self.btn_apply_config.pack(padx=14, pady=(0, 10), anchor="w")
+        self.btn_apply_config.pack(side="left", padx=(0, 10))
+
+        self.btn_reset_config = ctk.CTkButton(
+            action_bar,
+            text="↩️ Khôi phục mặc định",
+            height=38,
+            width=160,
+            font=FONTS["caption"],
+            fg_color="transparent",
+            border_width=1,
+            border_color=COLORS["border_dark"],
+            command=self._reset_configuration
+        )
+        self.btn_reset_config.pack(side="left")
+
 
         # -------------------------------------------------------------------------
         # KHUNG HỖ TRỢ CÀI ĐẶT PYTORCH CUDA TRỰC TIẾP TẠI MỤC 2
@@ -612,6 +819,128 @@ class SettingsView(ctk.CTkScrollableFrame):
     def _hide_sec2_cuda_card(self):
         if self.sec2_cuda_card.winfo_manager() == "pack":
             self.sec2_cuda_card.pack_forget()
+
+    def _browse_output_folder(self):
+        """Mở hộp thoại chọn thư mục lưu trữ file âm thanh."""
+        chosen = filedialog.askdirectory(
+            initialdir=self.output_dir_var.get(),
+            title="Chọn thư mục lưu tệp âm thanh xuất ra"
+        )
+        if chosen:
+            clean_path = os.path.normpath(chosen)
+            self.output_dir_var.set(clean_path)
+            AppLogger.info(f"Đã chọn thư mục lưu âm thanh: {clean_path}", source="Settings")
+
+    def _open_output_folder(self):
+        """Mở thư mục lưu âm thanh trong Windows File Explorer."""
+        folder = self.output_dir_var.get().strip()
+        if not os.path.exists(folder):
+            try:
+                os.makedirs(folder, exist_ok=True)
+            except Exception:
+                pass
+        try:
+            os.startfile(folder)
+            AppLogger.info(f"Đã mở thư mục âm thanh trong File Explorer: {folder}", source="Settings")
+        except Exception as e:
+            AppLogger.error(f"Không thể mở thư mục '{folder}': {e}", source="Settings")
+
+    def _on_theme_select(self, new_theme: str):
+        """Khi người dùng đổi giao diện trong menu Settings."""
+        self.theme_var.set(new_theme)
+        ctk.set_appearance_mode(new_theme)
+
+    def _save_configuration(self):
+        """Lưu vĩnh viễn các tùy chọn của người dùng vào user_settings.json."""
+        chosen_profile_name = self.profile_menu.get()
+        profile_key = self._profiles_map.get(chosen_profile_name, DEFAULT_PROFILE_KEY)
+        precision_str = "int8" if "int8" in self.precision_menu.get() else "fp32"
+        auto_load = self.auto_load_var.get()
+        output_dir = self.output_dir_var.get().strip()
+        auto_play = self.auto_play_var.get()
+        default_voice = self.default_voice_menu.get()
+        theme_mode = self.theme_var.get()
+        clip_trigger = self.realtime_clip_var.get()
+
+        jitter_str = self.jitter_menu.get()
+        prebuf = 2
+        if "1" in jitter_str:
+            prebuf = 1
+        elif "3" in jitter_str:
+            prebuf = 3
+
+        settings_to_save = {
+            "default_profile": profile_key,
+            "precision": precision_str,
+            "auto_load_on_startup": auto_load,
+            "audio_output_dir": output_dir,
+            "auto_play_audio": auto_play,
+            "default_voice": default_voice,
+            "appearance_mode": theme_mode,
+            "realtime_clipboard_trigger": clip_trigger,
+            "realtime_prebuffer_chunks": prebuf,
+        }
+
+        # 1. Ghi vào ConfigManager & file JSON
+        success = self.config_manager.save(settings_to_save)
+
+        # 2. Cập nhật các service tại chỗ
+        self.tts_engine.set_output_dir(output_dir)
+        ctk.set_appearance_mode(theme_mode)
+
+        if self.on_config_saved:
+            self.on_config_saved(settings_to_save)
+
+        # 3. Hiển thị thông báo trực quan
+        if success:
+            self.engine_log_box.show_success(
+                title="Đã lưu cấu hình thành công",
+                message="💾 Toàn bộ thiết lập đã được lưu vào 'user_settings.json'.",
+                details=(
+                    f"• Cấu hình khởi động: {chosen_profile_name}\n"
+                    f"• Thư mục lưu audio: {output_dir}\n"
+                    f"• Giọng đọc mặc định: {default_voice}\n"
+                    f"• Tự động nạp khi mở app: {'Bật' if auto_load else 'Tắt'}\n"
+                    f"• Tự động phát sau khi tạo: {'Bật' if auto_play else 'Tắt'}\n"
+                    f"• Giao diện hiển thị: {theme_mode}\n"
+                    f"• Realtime Jitter-Buffer: {prebuf} chunks"
+                )
+            )
+            AppLogger.success("Đã lưu cấu hình người dùng vào user_settings.json thành công.", source="Settings")
+        else:
+            self.engine_log_box.show_error(
+                title="Lỗi lưu cấu hình",
+                message="Không thể ghi vào tệp user_settings.json. Vui lòng kiểm tra lại quyền truy cập thư mục."
+            )
+
+    def _reset_configuration(self):
+        """Khôi phục cấu hình về mặc định xuất xưởng."""
+        defaults = self.config_manager.reset_defaults()
+        default_prof_name = PROFILES[DEFAULT_PROFILE_KEY]["name"]
+        self.profile_menu.set(default_prof_name)
+        self._on_profile_select(default_prof_name)
+        self.precision_menu.set("fp32 (Chất lượng tối đa)")
+        self.auto_load_var.set(True)
+        self.output_dir_var.set(str(OUTPUTS_DIR))
+        self.auto_play_var.set(True)
+        self.default_voice_menu.set(DEFAULT_VOICE)
+        self.theme_var.set("Dark")
+        self.theme_menu_setting.set("Dark")
+        ctk.set_appearance_mode("Dark")
+        self.realtime_clip_var.set(False)
+        self.jitter_menu.set("2 chunks (Cân bằng - Khuyên dùng)")
+
+        self.tts_engine.set_output_dir(str(OUTPUTS_DIR))
+
+        if self.on_config_saved:
+            self.on_config_saved(defaults)
+
+        self.engine_log_box.show_success(
+            title="Đã khôi phục cài đặt gốc",
+            message="Toàn bộ thông số đã được đưa về cấu hình chuẩn ban đầu.",
+            details=f"Mô hình: {default_prof_name} | Thư mục: {OUTPUTS_DIR} | Giọng: {DEFAULT_VOICE}"
+        )
+        AppLogger.info("Đã khôi phục cấu hình mặc định ban đầu.", source="Settings")
 
     def _on_profile_select(self, chosen_name: str):
         profile_key = self._profiles_map.get(chosen_name, DEFAULT_PROFILE_KEY)

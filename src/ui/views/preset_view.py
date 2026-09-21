@@ -189,7 +189,15 @@ class PresetView(ctk.CTkFrame):
         self.voice_tags_label.configure(text=f"{data.get('gender', '')} • {data.get('region', '')} • {data.get('style', '')}")
         self.voice_desc_label.configure(text=data.get('desc', ''))
 
+    def set_selected_voice(self, voice_name: str):
+        """Đặt giọng đọc được chọn theo cấu hình lưu trữ."""
+        if voice_name in self._all_voice_names:
+            self.voice_menu.set(voice_name)
+            self._on_voice_select(voice_name)
+
+
     def _handle_generate_click(self, text: str):
         if self.on_generate_request:
             self.on_generate_request(text, self.selected_voice)
+
 

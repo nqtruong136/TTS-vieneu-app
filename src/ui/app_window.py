@@ -18,6 +18,7 @@ from ..core.tts_engine import TTSEngine
 from ..core.audio_player import AudioPlayer
 from ..core.logger import AppLogger
 from ..core.progress import ProgressTracker
+from ..core.config_manager import ConfigManager
 from ..database.history_manager import HistoryManager
 from .components.nav_rail import NavRail
 from .components.log_console import LogConsole
@@ -33,17 +34,24 @@ class AppWindow(ctk.CTk):
     def __init__(self):
         super().__init__()
 
-        # 1. Khởi tạo cửa sổ
+        # 1. Nạp cấu hình bền vững
+        self.config_manager = ConfigManager.get_instance()
+        saved_theme = self.config_manager.get("appearance_mode", "Dark")
+
+        # Khởi tạo cửa sổ
         self.title(APP_TITLE)
         self.geometry(APP_GEOMETRY)
         self.minsize(*APP_MINSIZE)
-        ctk.set_appearance_mode("Dark")
+        ctk.set_appearance_mode(saved_theme)
         ctk.set_default_color_theme("blue")
 
         # 2. Khởi tạo Core Services & Database
         self.audio_player = AudioPlayer()
         self.history_manager = HistoryManager()
-        self.tts_engine = TTSEngine(on_status_change=self._on_engine_status_change)
+        self.tts_engine = TTSEngine(
+            on_status_change=self._on_engine_status_change,
+            output_dir=self.config_manager.get("audio_output_dir")
+        )
         self._log_window: Optional[ctk.CTkToplevel] = None
 
         AppLogger.info("Khởi động ứng dụng VieNeu-TTS Studio...", source="App")
@@ -74,11 +82,15 @@ class AppWindow(ctk.CTk):
         self.grid_columnconfigure(1, weight=1)
         self.grid_rowconfigure(0, weight=1)
 
+        saved_theme = self.config_manager.get("appearance_mode", "Dark")
+
         # 1. Nav Rail (Bên trái ngoài cùng)
         self.nav_rail = NavRail(
             self,
             on_nav_change=self._switch_view,
-            on_open_log=self._open_log_popup
+            on_open_log=self._open_log_popup,
+            on_theme_change=self._handle_nav_theme_change,
+            initial_theme=saved_theme
         )
         self.nav_rail.grid(row=0, column=0, sticky="nsew")
 
@@ -98,6 +110,9 @@ class AppWindow(ctk.CTk):
             on_generate_request=self._handle_preset_generate,
             progress_tracker=self.tts_engine.progress
         )
+        # Đồng bộ giọng đọc mặc định đã lưu
+        saved_voice = self.config_manager.get("default_voice", DEFAULT_VOICE)
+        self.preset_view.set_selected_voice(saved_voice)
         self.views["preset"] = self.preset_view
 
         # View 2: Clone Voice
@@ -114,17 +129,24 @@ class AppWindow(ctk.CTk):
             self.content_container,
             tts_engine=self.tts_engine
         )
+        # Áp dụng cấu hình Realtime đã lưu
+        if self.config_manager.get("realtime_clipboard_trigger", False):
+            self.realtime_view.watcher.set_active(True)
+        prebuf = self.config_manager.get("realtime_prebuffer_chunks", 2)
+        self.realtime_view.streamer.prebuffer_chunks = prebuf
         self.views["realtime"] = self.realtime_view
 
-        # View 4: Settings & Diagnostics (Có kèm Live Log Console và các Progress Bars)
+        # View 4: Settings & Diagnostics (Có kèm Live Log Console và Lưu cấu hình)
         self.settings_view = SettingsView(
             self.content_container,
             tts_engine=self.tts_engine,
-            on_profile_reloaded=self._on_profile_reloaded
+            config_manager=self.config_manager,
+            on_profile_reloaded=self._on_profile_reloaded,
+            on_config_saved=self._on_config_saved
         )
         self.views["settings"] = self.settings_view
 
-        # View 4: History View (Các giọng đã tạo kèm phân trang & YouTube Scrubber)
+        # View 5: History View (Các giọng đã tạo kèm phân trang & YouTube Scrubber)
         self.history_view = HistoryView(
             self.content_container,
             history_manager=self.history_manager,
@@ -174,7 +196,35 @@ class AppWindow(ctk.CTk):
             self.clone_view.editor_panel._handle_generate_click()
 
     def _initial_model_load(self):
-        self.tts_engine.load_model_async(DEFAULT_PROFILE_KEY)
+        if self.config_manager.get("auto_load_on_startup", True):
+            profile_key = self.config_manager.get("default_profile", DEFAULT_PROFILE_KEY)
+            self.tts_engine.load_model_async(profile_key)
+        else:
+            self.nav_rail.set_engine_status(is_ready=False, is_loading=False, error=None)
+            self.preset_view.editor_panel.set_status("⏸️ Chế độ tiết kiệm RAM: Mô hình chưa nạp. Nhấn 'Bắt đầu tạo giọng nói' hoặc mở Tab Cài đặt để nạp.")
+
+    def _handle_nav_theme_change(self, new_mode: str):
+        """Khi người dùng chuyển đổi theme ở thanh bên NavRail."""
+        self.config_manager.set("appearance_mode", new_mode, auto_save=True)
+        if hasattr(self, "settings_view") and hasattr(self.settings_view, "theme_menu_setting"):
+            self.settings_view.theme_menu_setting.set(new_mode)
+
+    def _on_config_saved(self, new_settings: Dict[str, Any]):
+        """Đồng bộ các thành phần UI khi người dùng lưu cấu hình mới trong Settings."""
+        # Đồng bộ giọng đọc sang PresetView
+        def_voice = new_settings.get("default_voice")
+        if def_voice and hasattr(self, "preset_view"):
+            self.preset_view.set_selected_voice(def_voice)
+
+        # Đồng bộ theme sang NavRail
+        app_theme = new_settings.get("appearance_mode")
+        if app_theme and hasattr(self, "nav_rail"):
+            self.nav_rail.set_theme(app_theme)
+
+        # Đồng bộ prebuffer sang RealtimeView
+        prebuf = new_settings.get("realtime_prebuffer_chunks", 2)
+        if hasattr(self, "realtime_view") and hasattr(self.realtime_view, "streamer"):
+            self.realtime_view.streamer.prebuffer_chunks = prebuf
 
     def _on_profile_reloaded(self, profile_key: str):
         self._on_engine_status_change(f"✅ Đã đổi sang cấu hình: {profile_key}", is_ready=True, is_loading=False, error=None)
@@ -228,7 +278,8 @@ class AppWindow(ctk.CTk):
         )
 
         # 2. Cập nhật player và phát audio
-        self.preset_view.player_bar.set_audio_result(result)
+        auto_play = self.config_manager.get("auto_play_audio", True)
+        self.preset_view.player_bar.set_audio_result(result, auto_play=auto_play)
 
         # 3. In log trạng thái thành công tại chỗ trigger
         self.preset_view.editor_panel.action_log_box.show_success(
@@ -294,7 +345,8 @@ class AppWindow(ctk.CTk):
         )
 
         # 2. Cập nhật player clone
-        self.clone_view.player_bar.set_audio_result(result)
+        auto_play = self.config_manager.get("auto_play_audio", True)
+        self.clone_view.player_bar.set_audio_result(result, auto_play=auto_play)
 
         # 3. In log trạng thái thành công tại chỗ trigger
         self.clone_view.editor_panel.action_log_box.show_success(

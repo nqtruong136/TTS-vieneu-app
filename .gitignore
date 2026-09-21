@@ -34,6 +34,8 @@ outputs/*
 scratch/
 temp/
 tmp/
+user_settings.json
+
 
 # OS specific files
 Thumbs.db

@@ -3,11 +3,26 @@ TTS Engine Service wrapping the VieNeu SDK.
 Integrated with AppLogger for exception tracking and ProgressTracker for percentage reporting.
 """
 import os
+import sys
+import io
 import time
 import threading
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Callable, Dict, Any
+
+# Tắt terminal progress bar của Hugging Face / tqdm để tránh lỗi 'NoneType' write trên Windows pythonw
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+os.environ["TQDM_DISABLE"] = "1"
+
+if sys.stdout is None:
+    sys.stdout = io.StringIO()
+if sys.stderr is None:
+    sys.stderr = sys.stdout
+if getattr(sys, "__stdout__", None) is None:
+    sys.__stdout__ = sys.stdout
+if getattr(sys, "__stderr__", None) is None:
+    sys.__stderr__ = sys.stderr
 
 import soundfile as sf
 from vieneu import Vieneu

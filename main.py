@@ -7,35 +7,29 @@ import os
 import io
 import time
 
-# Đảm bảo thư mục dự án nằm trong sys.path
+# 1. Tắt hoàn toàn progress bar của Hugging Face và tqdm trên terminal
+# để tránh lỗi 'NoneType' object has no attribute 'write' khi chạy bằng pythonw.exe
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+os.environ["TQDM_DISABLE"] = "1"
+
+# 2. Đảm bảo thư mục dự án nằm trong sys.path
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-# An toàn hóa stdout/stderr cho cả chế độ python.exe và pythonw.exe
-class SafeWriter:
-    """Stream ghi an toàn khi sys.stdout / sys.stderr là None (dưới pythonw.exe)."""
-    def __init__(self, fallback_path=None):
-        self.fallback_path = fallback_path
+# 3. Chuẩn hóa luồng xuất nhập chuẩn (stdout / stderr) ngay lập tức
+# Khi chạy qua pythonw.exe, sys.stdout và sys.stderr mặc định là None.
+# Ta mở một file stream thật (TextIOWrapper) để các thư viện như tqdm, huggingface, sounddevice
+# không bao giờ bị lỗi 'NoneType' has no attribute 'write' hay 'flush'.
+LOG_FILE_PATH = os.path.join(BASE_DIR, "app_output.log")
 
-    def write(self, text):
-        if self.fallback_path and text:
-            try:
-                with open(self.fallback_path, "a", encoding="utf-8") as f:
-                    f.write(text)
-            except Exception:
-                pass
-
-    def flush(self):
-        pass
-
-    def isatty(self):
-        return False
-
-log_file_path = os.path.join(BASE_DIR, "app_output.log")
+try:
+    _log_stream = open(LOG_FILE_PATH, "a", encoding="utf-8", buffering=1)
+except Exception:
+    _log_stream = io.StringIO()
 
 if sys.stdout is None:
-    sys.stdout = SafeWriter(log_file_path)
+    sys.stdout = _log_stream
 elif hasattr(sys.stdout, "reconfigure"):
     try:
         sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -43,12 +37,17 @@ elif hasattr(sys.stdout, "reconfigure"):
         pass
 
 if sys.stderr is None:
-    sys.stderr = SafeWriter(log_file_path)
+    sys.stderr = _log_stream
 elif hasattr(sys.stderr, "reconfigure"):
     try:
         sys.stderr.reconfigure(encoding="utf-8", errors="replace")
     except Exception:
         pass
+
+if getattr(sys, "__stdout__", None) is None:
+    sys.__stdout__ = sys.stdout
+if getattr(sys, "__stderr__", None) is None:
+    sys.__stderr__ = sys.stderr
 
 
 def run_app():

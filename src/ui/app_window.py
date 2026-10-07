@@ -182,7 +182,8 @@ class AppWindow(ctk.CTk):
             if view_key == "history":
                 self.history_view.refresh_data()
             elif view_key == "settings":
-                self.settings_view._refresh_all()
+                if not getattr(self.settings_view, "_hw_loaded", False):
+                    self.settings_view._refresh_all_async()
 
     def _bind_shortcuts(self):
         # Ctrl + Enter để bắt đầu sinh giọng nói nhanh
@@ -266,16 +267,21 @@ class AppWindow(ctk.CTk):
     def _on_preset_success(self, result: Dict[str, Any]):
         self.preset_view.editor_panel.set_generating_state(False)
 
-        # 1. Lưu SQLite
-        self.history_manager.add_record(
-            text=result["text"],
-            voice_name=result["voice"],
-            profile_name=result["profile_name"],
-            audio_path=result["audio_path"],
-            duration=result["duration"],
-            process_time=result["process_time"],
-            rtf=result["rtf"]
-        )
+        # 1. Lưu SQLite ngầm
+        import threading
+        threading.Thread(
+            target=lambda: self.history_manager.add_record(
+                text=result["text"],
+                voice_name=result["voice"],
+                profile_name=result["profile_name"],
+                audio_path=result["audio_path"],
+                duration=result["duration"],
+                process_time=result["process_time"],
+                rtf=result["rtf"]
+            ),
+            daemon=True,
+            name="HistoryPresetSaveWorker"
+        ).start()
 
         # 2. Cập nhật player và phát audio
         auto_play = self.config_manager.get("auto_play_audio", True)
@@ -333,16 +339,21 @@ class AppWindow(ctk.CTk):
     def _on_clone_success(self, result: Dict[str, Any]):
         self.clone_view.editor_panel.set_generating_state(False)
 
-        # 1. Lưu SQLite
-        self.history_manager.add_record(
-            text=result["text"],
-            voice_name=result["voice"],
-            profile_name=result["profile_name"],
-            audio_path=result["audio_path"],
-            duration=result["duration"],
-            process_time=result["process_time"],
-            rtf=result["rtf"]
-        )
+        # 1. Lưu SQLite ngầm
+        import threading
+        threading.Thread(
+            target=lambda: self.history_manager.add_record(
+                text=result["text"],
+                voice_name=result["voice"],
+                profile_name=result["profile_name"],
+                audio_path=result["audio_path"],
+                duration=result["duration"],
+                process_time=result["process_time"],
+                rtf=result["rtf"]
+            ),
+            daemon=True,
+            name="HistoryCloneSaveWorker"
+        ).start()
 
         # 2. Cập nhật player clone
         auto_play = self.config_manager.get("auto_play_audio", True)

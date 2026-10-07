@@ -10,7 +10,9 @@ import time
 # 1. Tắt hoàn toàn progress bar của Hugging Face và tqdm trên terminal
 # để tránh lỗi 'NoneType' object has no attribute 'write' khi chạy bằng pythonw.exe
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["TQDM_DISABLE"] = "1"
+os.environ["PYGAME_HIDE_SUPPORT_PROMPT"] = "1"
 
 # 2. Đảm bảo thư mục dự án nằm trong sys.path
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

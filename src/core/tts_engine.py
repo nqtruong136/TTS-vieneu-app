@@ -13,6 +13,7 @@ from typing import Optional, Callable, Dict, Any
 
 # Tắt terminal progress bar của Hugging Face / tqdm để tránh lỗi 'NoneType' write trên Windows pythonw
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 os.environ["TQDM_DISABLE"] = "1"
 
 if sys.stdout is None:

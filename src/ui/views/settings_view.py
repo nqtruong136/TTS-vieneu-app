@@ -7,7 +7,7 @@ import os
 import sys
 import subprocess
 import threading
-from typing import Callable, Optional
+from typing import Callable, Optional, Dict, Any
 from tkinter import filedialog
 import customtkinter as ctk
 
@@ -68,9 +68,11 @@ class SettingsView(ctk.CTkScrollableFrame):
         self.bench_progress = ProgressTracker()
         self.download_progress = ProgressTracker()
 
+        self._hw_loaded = False
+        self._cache_loaded = False
+
         self._create_widgets()
-        self._refresh_hardware_info()
-        self._refresh_model_cache_info()
+        self._refresh_all_async()
 
 
     def _create_widgets(self):
@@ -656,14 +658,47 @@ class SettingsView(ctk.CTkScrollableFrame):
         sep.pack(fill="x", padx=14, pady=2)
         return card
 
+    def _refresh_all_async(self, force: bool = False):
+        """Quét phần cứng và cache ngầm trong luồng worker, không bao giờ chặn UI thread."""
+        def _worker():
+            try:
+                hw = HardwareService.get_hardware_info(force_refresh=force)
+                UIDispatcher.post(self._apply_hardware_info, hw)
+            except Exception as e:
+                AppLogger.exception(f"Lỗi kiểm tra phần cứng: {e}", exc=e, source="Settings")
+
+            try:
+                cache = HardwareService.get_model_cache_info(force_refresh=force)
+                UIDispatcher.post(self._apply_model_cache_info, cache)
+            except Exception as e:
+                AppLogger.exception(f"Lỗi kiểm tra cache mô hình: {e}", exc=e, source="Settings")
+
+        threading.Thread(target=_worker, daemon=True, name="SettingsScanWorker").start()
+
     def _refresh_all(self):
-        AppLogger.info("Bắt đầu quét lại phần cứng và cache...", source="Settings")
-        self._refresh_hardware_info()
-        self._refresh_model_cache_info()
+        AppLogger.info("Bắt đầu quét lại phần cứng và cache (bất đồng bộ)...", source="Settings")
+        self._refresh_all_async(force=True)
 
-    def _refresh_hardware_info(self):
-        hw = HardwareService.get_hardware_info()
+    def _refresh_hardware_info(self, force: bool = False):
+        def _worker():
+            try:
+                hw = HardwareService.get_hardware_info(force_refresh=force)
+                UIDispatcher.post(self._apply_hardware_info, hw)
+            except Exception as e:
+                AppLogger.exception(f"Lỗi kiểm tra phần cứng: {e}", exc=e, source="Settings")
+        threading.Thread(target=_worker, daemon=True, name="HWScanWorker").start()
 
+    def _refresh_model_cache_info(self, force: bool = False):
+        def _worker():
+            try:
+                cache = HardwareService.get_model_cache_info(force_refresh=force)
+                UIDispatcher.post(self._apply_model_cache_info, cache)
+            except Exception as e:
+                AppLogger.exception(f"Lỗi kiểm tra cache mô hình: {e}", exc=e, source="Settings")
+        threading.Thread(target=_worker, daemon=True, name="CacheScanWorker").start()
+
+    def _apply_hardware_info(self, hw: Dict[str, Any]):
+        self._hw_loaded = True
         # CPU info
         self.cpu_info_label.configure(
             text=f"💻 CPU: {hw['cpu_name']} ({hw['cpu_cores']} luồng xử lý) • ONNX Runtime v{hw['ort_version']} [CPU]"
@@ -709,8 +744,8 @@ class SettingsView(ctk.CTkScrollableFrame):
             self.folder_frame_sec1.pack_forget()
             self.sec2_cuda_card.pack_forget()
 
-    def _refresh_model_cache_info(self):
-        cache = HardwareService.get_model_cache_info()
+    def _apply_model_cache_info(self, cache: Dict[str, Any]):
+        self._cache_loaded = True
         self.cache_size_label.configure(
             text=f"Tổng dung lượng Cache: {cache['total_size_mb']} MB ({len(cache['models'])} mô hình)"
         )

@@ -16,9 +16,15 @@ from .progress import ProgressTracker
 
 
 class HardwareService:
-    @staticmethod
-    def get_hardware_info() -> Dict[str, Any]:
+    _cached_hw_info: Optional[Dict[str, Any]] = None
+    _cached_cache_info: Optional[Dict[str, Any]] = None
+
+    @classmethod
+    def get_hardware_info(cls, force_refresh: bool = False) -> Dict[str, Any]:
         """Kiểm tra chi tiết thông tin phần cứng CPU, GPU và thư viện AI."""
+        if not force_refresh and cls._cached_hw_info is not None:
+            return cls._cached_hw_info
+
         # 1. CPU Info
         cpu_name = platform.processor() or "Unknown CPU"
         cpu_cores = os.cpu_count() or 1
@@ -68,7 +74,7 @@ class HardwareService:
         ort_providers = ort.get_available_providers()
         AppLogger.info(f"ONNX Runtime v{ort_version} providers: {ort_providers}", source="Hardware")
 
-        return {
+        info = {
             "cpu_name": cpu_name,
             "cpu_cores": cpu_cores,
             "has_nvidia": has_nvidia,
@@ -82,10 +88,14 @@ class HardwareService:
             "ort_version": ort_version,
             "ort_providers": ort_providers,
         }
+        cls._cached_hw_info = info
+        return info
 
-    @staticmethod
-    def get_model_cache_info() -> Dict[str, Any]:
+    @classmethod
+    def get_model_cache_info(cls, force_refresh: bool = False) -> Dict[str, Any]:
         """Kiểm tra dung lượng và trạng thái tải của các mô hình trong Hugging Face Hub cache."""
+        if not force_refresh and cls._cached_cache_info is not None:
+            return cls._cached_cache_info
         hf_cache_dir = Path.home() / ".cache" / "huggingface" / "hub"
 
         models = {
@@ -123,11 +133,13 @@ class HardwareService:
                 m["size_mb"] = round(size_mb, 1)
                 total_size_mb += size_mb
 
-        return {
+        res = {
             "cache_dir": str(hf_cache_dir),
             "models": models,
             "total_size_mb": round(total_size_mb, 1),
         }
+        cls._cached_cache_info = res
+        return res
 
     @staticmethod
     def run_benchmark(

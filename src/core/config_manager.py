@@ -34,7 +34,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
 class ConfigManager:
     """Quản lý đọc/ghi cấu hình người dùng vào tệp JSON bền vững."""
     _instance = None
-    _lock = threading.Lock()
+    _lock = threading.RLock()
 
     def __init__(self, config_path: str = None):
         if config_path is None:

@@ -12,6 +12,8 @@ COLORS = {
     "danger_hover": "#DC2626",
     "card_bg_dark": "#1F2937",    # Nền card tối
     "card_bg_light": "#F3F4F6",   # Nền card sáng
+    "sidebar_bg_dark": "#111827", # Nền sidebar tối
+    "sidebar_bg_light": "#E5E7EB",# Nền sidebar sáng
     "border_dark": "#374151",
     "border_light": "#E5E7EB",
     "text_muted_dark": "#9CA3AF",

@@ -129,9 +129,6 @@ class AppWindow(ctk.CTk):
             self.content_container,
             tts_engine=self.tts_engine
         )
-        # Áp dụng cấu hình Realtime đã lưu
-        if self.config_manager.get("realtime_clipboard_trigger", False):
-            self.realtime_view.watcher.set_active(True)
         prebuf = self.config_manager.get("realtime_prebuffer_chunks", 2)
         self.realtime_view.streamer.prebuffer_chunks = prebuf
         self.views["realtime"] = self.realtime_view
@@ -386,26 +383,26 @@ class AppWindow(ctk.CTk):
         AppLogger.info("Đã nạp văn bản từ lịch sử vào ô soạn thảo.", source="App")
 
     def on_closing(self):
+        AppLogger.info("Đang thoát ứng dụng...", source="App")
         try:
-            self.audio_player.stop()
             if hasattr(self, "audio_player") and self.audio_player:
                 self.audio_player.stop()
         except Exception:
             pass
-        AppLogger.info("Đang thoát ứng dụng...", source="App")
-        self.destroy()
 
         try:
             if hasattr(self, "realtime_view") and self.realtime_view:
-                if hasattr(self.realtime_view, "audio_streamer") and self.realtime_view.audio_streamer:
-                    self.realtime_view.audio_streamer.stop()
-                if hasattr(self.realtime_view, "clipboard_watcher") and self.realtime_view.clipboard_watcher:
-                    self.realtime_view.clipboard_watcher.stop()
+                self.realtime_view.destroy()
         except Exception:
             pass
 
         try:
-            AppLogger.info("Đang đóng và giải phóng ứng dụng...", source="App")
+            if hasattr(self, "_log_window") and self._log_window and self._log_window.winfo_exists():
+                self._log_window.destroy()
+        except Exception:
+            pass
+
+        try:
             self.destroy()
         except Exception:
             pass

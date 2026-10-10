@@ -1,6 +1,8 @@
 """
 Realtime Streaming Reader View (Tab: Đọc Realtime).
-Listens to Windows Clipboard (Ctrl+C trigger) to read news, books, articles instantly.
+Supports two trigger modes:
+1. Lark Floating Toolbar: Highlights/drags text anywhere on Windows -> shows horizontal pill toolbar -> click "Đọc ngay".
+2. Clipboard Reader: Copies text (Ctrl + C) -> reads automatically.
 Features sub-second streaming audio playback via sounddevice, instant stop,
 and a sleek Quick History Preview pane on the right.
 """
@@ -14,10 +16,13 @@ import pyperclip
 
 from ..styles import COLORS, FONTS
 from ..dispatcher import UIDispatcher
+from ..components.floating_toolbar import FloatingToolbar
 from ...config import DEFAULT_VOICE, AVAILABLE_VOICES
 from ...core.tts_engine import TTSEngine
 from ...core.realtime_streamer import RealtimeAudioStreamer
 from ...core.clipboard_watcher import ClipboardWatcher
+from ...core.selection_watcher import SelectionWatcher
+from ...core.config_manager import ConfigManager
 from ...core.logger import AppLogger
 
 
@@ -31,8 +36,26 @@ class RealtimeView(ctk.CTkFrame):
         super().__init__(master, fg_color="transparent", **kwargs)
 
         self.tts_engine = tts_engine
+        self.config_manager = ConfigManager.get_instance()
+        self.trigger_mode = self.config_manager.get("realtime_trigger_mode", "selection_toolbar")
+
         self.streamer = RealtimeAudioStreamer()
         self.watcher = ClipboardWatcher(on_new_text=self._on_clipboard_text)
+
+        # Khởi tạo thanh công cụ nổi kiểu Lark
+        self.floating_toolbar = FloatingToolbar(
+            self,
+            on_read_click=self._on_floating_read,
+            on_stop_click=self._handle_stop_click,
+            on_dismiss=self._on_floating_dismiss
+        )
+
+        # Khởi tạo bộ theo dõi kéo chuột tô đen trên Windows
+        self.selection_watcher = SelectionWatcher(
+            on_selection=self._on_mouse_selection,
+            on_dismiss=self._on_mouse_dismiss,
+            is_point_inside_toolbar=self.floating_toolbar.is_point_inside
+        )
 
         # Trạng thái
         self.current_text = ""
@@ -41,7 +64,18 @@ class RealtimeView(ctk.CTkFrame):
         self._current_worker_thread: Optional[threading.Thread] = None
 
         self._create_widgets()
+
+        # Khởi động listeners nền
         self.watcher.start()
+        self.selection_watcher.start()
+
+        # Khôi phục trạng thái hoạt động
+        saved_active = self.config_manager.get("realtime_clipboard_trigger", False)
+        if saved_active:
+            self.trigger_switch.select()
+        else:
+            self.trigger_switch.deselect()
+        self._apply_trigger_state()
 
     def _create_widgets(self):
         self.grid_columnconfigure(0, weight=1)
@@ -71,19 +105,19 @@ class RealtimeView(ctk.CTkFrame):
 
         ctk.CTkLabel(
             h_layout,
-            text="⚡ ĐỌC REALTIME (STREAMING CLIPBOARD READER)",
+            text="⚡ ĐỌC REALTIME THEO THỜI GIAN THỰC",
             font=("Segoe UI", 16, "bold"),
             text_color=COLORS["primary"]
         ).pack(anchor="w")
 
         ctk.CTkLabel(
             h_layout,
-            text="Tự động đọc bài báo, tài liệu, sách tức thì khi bạn bôi đen và bấm Copy (Ctrl + C)",
+            text="Tô đen văn bản ở bất kỳ đâu để hiện thanh đọc tức thì (kiểu Lark) hoặc tự động đọc khi Copy (Ctrl + C)",
             font=FONTS["caption"],
             text_color="gray"
         ).pack(anchor="w", pady=(2, 0))
 
-        # 1.2 Control Card (Trigger Switch, Giọng đọc, Nút Dừng, Trạng thái)
+        # 1.2 Control Card (Trigger Switch, Giọng đọc, Chế độ kích hoạt, Nút Dừng, Trạng thái)
         control_card = ctk.CTkFrame(
             left_container,
             corner_radius=8,
@@ -96,36 +130,36 @@ class RealtimeView(ctk.CTkFrame):
         ctrl_inner = ctk.CTkFrame(control_card, fg_color="transparent")
         ctrl_inner.pack(fill="x", padx=16, pady=12)
 
-        # Hàng 1: Switch Bật/Tắt + Chọn Giọng + Nút Dừng/Đọc lại
+        # Hàng 1: Switch Bật/Tắt + Segmented Mode Selector + Nút Dừng / Đọc lại
         top_ctrl = ctk.CTkFrame(ctrl_inner, fg_color="transparent")
         top_ctrl.pack(fill="x", pady=(0, 10))
 
         self.trigger_switch = ctk.CTkSwitch(
             top_ctrl,
-            text="📡 Tự động đọc khi Copy (Ctrl + C)",
+            text="⚡ Kích hoạt Realtime",
             font=("Segoe UI", 13, "bold"),
             progress_color=COLORS["primary"],
             command=self._on_toggle_trigger
         )
-        self.trigger_switch.pack(side="left", padx=(0, 16))
+        self.trigger_switch.pack(side="left", padx=(0, 14))
 
-        # Chọn giọng
-        ctk.CTkLabel(top_ctrl, text="🎙 Giọng:", font=FONTS["body"]).pack(side="left", padx=(0, 6))
-        self.voice_menu = ctk.CTkOptionMenu(
+        # Chọn chế độ kích hoạt
+        self.mode_values = ["🖱️ Thanh nổi khi tô đen (Lark)", "📋 Đọc khi Copy (Ctrl+C)"]
+        self.mode_selector = ctk.CTkSegmentedButton(
             top_ctrl,
-            values=AVAILABLE_VOICES,
-            width=135,
-            height=30,
-            font=FONTS["body"]
+            values=self.mode_values,
+            font=("Segoe UI", 11, "bold"),
+            command=self._on_change_mode
         )
-        self.voice_menu.set(DEFAULT_VOICE)
-        self.voice_menu.pack(side="left", padx=(0, 14))
+        default_mode_val = self.mode_values[0] if self.trigger_mode == "selection_toolbar" else self.mode_values[1]
+        self.mode_selector.set(default_mode_val)
+        self.mode_selector.pack(side="left", padx=(0, 14))
 
         # Nút Dừng đọc ngay
         self.btn_stop = ctk.CTkButton(
             top_ctrl,
             text="⏹ Dừng đọc",
-            width=90,
+            width=88,
             height=30,
             font=("Segoe UI", 11, "bold"),
             fg_color=COLORS["danger"],
@@ -139,7 +173,7 @@ class RealtimeView(ctk.CTkFrame):
         self.btn_replay = ctk.CTkButton(
             top_ctrl,
             text="🔄 Đọc lại",
-            width=85,
+            width=80,
             height=30,
             font=("Segoe UI", 11),
             fg_color=COLORS["secondary"],
@@ -149,7 +183,30 @@ class RealtimeView(ctk.CTkFrame):
         )
         self.btn_replay.pack(side="right")
 
-        # Hàng 2: Banner trạng thái trực quan
+        # Hàng 2: Chọn giọng đọc + Lời khuyên trực quan
+        mid_ctrl = ctk.CTkFrame(ctrl_inner, fg_color="transparent")
+        mid_ctrl.pack(fill="x", pady=(0, 10))
+
+        ctk.CTkLabel(mid_ctrl, text="🎙 Giọng đọc:", font=FONTS["body"]).pack(side="left", padx=(0, 6))
+        self.voice_menu = ctk.CTkOptionMenu(
+            mid_ctrl,
+            values=AVAILABLE_VOICES,
+            width=140,
+            height=30,
+            font=FONTS["body"]
+        )
+        self.voice_menu.set(DEFAULT_VOICE)
+        self.voice_menu.pack(side="left", padx=(0, 14))
+
+        self.tip_label = ctk.CTkLabel(
+            mid_ctrl,
+            text="💡 Kéo chuột tô đen chữ ở trình duyệt/Word/PDF, thả chuột là thanh '🔊 Đọc ngay' nổi lên!",
+            font=FONTS["caption"],
+            text_color="#9CA3AF"
+        )
+        self.tip_label.pack(side="left", padx=4)
+
+        # Hàng 3: Banner trạng thái trực quan
         self.status_banner = ctk.CTkFrame(
             ctrl_inner,
             corner_radius=6,
@@ -161,7 +218,7 @@ class RealtimeView(ctk.CTkFrame):
 
         self.status_indicator = ctk.CTkLabel(
             self.status_banner,
-            text="⚪ Đang tắt chế độ tự động. Bật công tắc bên trên để bắt đầu lắng nghe khay nhớ tạm (Clipboard).",
+            text="⚪ Đang tắt chế độ Realtime. Bật công tắc bên trên để bắt đầu.",
             font=FONTS["body"],
             text_color="gray",
             wraplength=600,
@@ -316,25 +373,74 @@ class RealtimeView(ctk.CTkFrame):
             justify="center"
         ).pack(pady=40)
 
+    def _on_change_mode(self, mode_str: str):
+        if "Lark" in mode_str:
+            self.trigger_mode = "selection_toolbar"
+        else:
+            self.trigger_mode = "clipboard_copy"
+        self.config_manager.set("realtime_trigger_mode", self.trigger_mode)
+        self._apply_trigger_state()
+
     def _on_toggle_trigger(self):
         is_active = bool(self.trigger_switch.get())
-        self.watcher.set_active(is_active)
+        self.config_manager.set("realtime_clipboard_trigger", is_active)
+        self._apply_trigger_state()
 
+    def _apply_trigger_state(self):
+        is_active = bool(self.trigger_switch.get())
         if is_active:
-            self.status_banner.configure(fg_color="#0D2818", border_color="#10B981")
-            self.status_indicator.configure(
-                text="🟢 Đang lắng nghe Clipboard... Bạn chỉ cần bôi đen văn bản trên Chrome/PDF/Sách rồi bấm Ctrl+C là app tự đọc ngay!",
-                text_color="#6EE7B7"
-            )
+            if self.trigger_mode == "selection_toolbar":
+                self.selection_watcher.set_active(True)
+                self.watcher.set_active(False)
+                self.tip_label.configure(text="💡 Kéo chuột tô đen chữ ở trình duyệt/Word/PDF, thả chuột là thanh '🔊 Đọc ngay' nổi lên!")
+                self.status_banner.configure(fg_color="#0D2818", border_color="#10B981")
+                self.status_indicator.configure(
+                    text="🟢 Đang kích hoạt thanh nổi kiểu Lark: Hãy kéo chuột tô đen (hoặc double-click) bất kỳ văn bản nào, thanh '🔊 Đọc ngay' sẽ lập tức xuất hiện cạnh con trỏ!",
+                    text_color="#6EE7B7"
+                )
+            else:
+                self.selection_watcher.set_active(False)
+                self.floating_toolbar.hide()
+                self.watcher.set_active(True)
+                self.tip_label.configure(text="💡 Chỉ cần bôi đen văn bản rồi nhấn Ctrl + C là hệ thống tự động phát âm thanh!")
+                self.status_banner.configure(fg_color="#0D2818", border_color="#10B981")
+                self.status_indicator.configure(
+                    text="🟢 Đang lắng nghe Clipboard... Bạn chỉ cần bôi đen văn bản trên Chrome/PDF/Sách rồi bấm Ctrl+C là app tự đọc ngay!",
+                    text_color="#6EE7B7"
+                )
         else:
+            self.selection_watcher.set_active(False)
+            self.watcher.set_active(False)
+            self.floating_toolbar.hide()
             self.status_banner.configure(fg_color="#1E222B", border_color=COLORS["border_dark"])
             self.status_indicator.configure(
-                text="⚪ Đang tạm dừng lắng nghe Clipboard. Bật công tắc bên trên để tiếp tục.",
+                text="⚪ Đang tạm dừng tính năng Realtime. Bật công tắc bên trên để bắt đầu sử dụng.",
                 text_color="gray"
             )
 
+    def _on_mouse_selection(self, text: str, screen_x: int, screen_y: int):
+        """Được gọi từ SelectionWatcher khi người dùng vừa kéo chuột tô đen xong trên Windows."""
+        UIDispatcher.post(self._show_floating_toolbar, text, screen_x, screen_y)
+
+    def _show_floating_toolbar(self, text: str, screen_x: int, screen_y: int):
+        if not self.trigger_switch.get() or self.trigger_mode != "selection_toolbar":
+            return
+        chosen_voice = self.voice_menu.get()
+        self.floating_toolbar.show_at(screen_x, screen_y, text, voice_name=chosen_voice)
+
+    def _on_mouse_dismiss(self):
+        """Người dùng nhấn chuột ra ngoài thanh nổi."""
+        UIDispatcher.post(self.floating_toolbar.hide)
+
+    def _on_floating_dismiss(self):
+        pass
+
+    def _on_floating_read(self, text: str):
+        """Người dùng bấm nút '🔊 Đọc ngay' trên thanh nổi kiểu Lark."""
+        self._process_new_text(text, source="selection_bar")
+
     def _on_clipboard_text(self, text: str):
-        """Được gọi từ ClipboardWatcher daemon thread khi có văn bản mới."""
+        """Được gọi từ ClipboardWatcher daemon thread khi có văn bản mới trong Clipboard."""
         UIDispatcher.post(self._process_new_text, text, "clipboard")
 
     def _handle_manual_trigger(self):
@@ -390,6 +496,7 @@ class RealtimeView(ctk.CTkFrame):
         self.streamer.stop()
 
         chosen_voice = self.voice_menu.get()
+        self.floating_toolbar.set_reading_state(True)
         self.status_banner.configure(fg_color="#0F2B38", border_color=COLORS["primary"])
         self.status_indicator.configure(
             text=f"🔊 ĐANG ĐỌC THEO THỜI GIAN THỰC... (Giọng: {chosen_voice})",
@@ -438,21 +545,30 @@ class RealtimeView(ctk.CTkFrame):
     def _on_stream_completed(self, total_time: float):
         self.btn_stop.configure(state="disabled")
         self.stream_stats_label.configure(text=f"✓ Đã đọc xong ({total_time:.1f}s)")
+        self.floating_toolbar.set_reading_state(False)
         if self.trigger_switch.get():
-            self.status_banner.configure(fg_color="#0D2818", border_color="#10B981")
-            self.status_indicator.configure(
-                text="🟢 Đang lắng nghe Clipboard... Bạn chỉ cần bôi đen văn bản trên Chrome/PDF/Sách rồi bấm Ctrl+C là app tự đọc ngay!",
-                text_color="#6EE7B7"
-            )
+            if self.trigger_mode == "selection_toolbar":
+                self.status_banner.configure(fg_color="#0D2818", border_color="#10B981")
+                self.status_indicator.configure(
+                    text="🟢 Đang kích hoạt thanh nổi kiểu Lark: Hãy kéo chuột tô đen (hoặc double-click) bất kỳ văn bản nào để đọc!",
+                    text_color="#6EE7B7"
+                )
+            else:
+                self.status_banner.configure(fg_color="#0D2818", border_color="#10B981")
+                self.status_indicator.configure(
+                    text="🟢 Đang lắng nghe Clipboard... Bạn chỉ cần bôi đen văn bản trên Chrome/PDF/Sách rồi bấm Ctrl+C là app tự đọc ngay!",
+                    text_color="#6EE7B7"
+                )
         else:
             self.status_banner.configure(fg_color="#1E222B", border_color=COLORS["border_dark"])
             self.status_indicator.configure(
-                text="⚪ Đã đọc xong. Bật công tắc bên trên để lắng nghe Clipboard.",
+                text="⚪ Đã đọc xong. Bật công tắc bên trên để tiếp tục.",
                 text_color="gray"
             )
 
     def _on_stream_error(self, err_msg: str):
         self.btn_stop.configure(state="disabled")
+        self.floating_toolbar.set_reading_state(False)
         self.status_banner.configure(fg_color="#2A1B1B", border_color=COLORS["danger"])
         self.status_indicator.configure(
             text=f"❌ Lỗi đọc âm thanh: {err_msg}",
@@ -463,10 +579,11 @@ class RealtimeView(ctk.CTkFrame):
         """Bấm nút Dừng đọc ngay."""
         self.streamer.stop()
         self.btn_stop.configure(state="disabled")
+        self.floating_toolbar.set_reading_state(False)
         self.stream_stats_label.configure(text="⏹ Đã dừng")
         self.status_banner.configure(fg_color="#1E222B", border_color=COLORS["border_dark"])
         self.status_indicator.configure(
-            text="⏹ Đã dừng đọc. Bấm 'Đọc lại' hoặc copy đoạn mới để tiếp tục.",
+            text="⏹ Đã dừng đọc. Bấm 'Đọc lại' hoặc tô đen đoạn mới để tiếp tục.",
             text_color="gray"
         )
         AppLogger.info("Người dùng đã bấm dừng đọc realtime.", source="Realtime")
@@ -583,5 +700,12 @@ class RealtimeView(ctk.CTkFrame):
             self.streamer.stop()
         if hasattr(self, "watcher"):
             self.watcher.stop()
+        if hasattr(self, "selection_watcher"):
+            self.selection_watcher.stop()
+        if hasattr(self, "floating_toolbar"):
+            try:
+                self.floating_toolbar.destroy()
+            except Exception:
+                pass
         super().destroy()
 

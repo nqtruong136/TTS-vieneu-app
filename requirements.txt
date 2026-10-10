@@ -11,8 +11,9 @@ soundfile>=0.12.1
 sounddevice>=0.5.0
 numpy>=1.26.0
 
-# Windows Clipboard Integration
+# Windows Clipboard & Mouse Selection Integration
 pyperclip>=1.8.0
+pynput>=1.7.6
 
 # VieNeu-TTS SDK
 vieneu>=3.6.4

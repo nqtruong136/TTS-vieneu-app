@@ -27,6 +27,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
 
     # Chế độ Realtime Streaming
     "realtime_clipboard_trigger": False,
+    "realtime_trigger_mode": "selection_toolbar",  # "selection_toolbar" hoặc "clipboard_copy"
     "realtime_prebuffer_chunks": 2,
 }
 
